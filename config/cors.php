@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'paths' => ['api/*'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie'],
     'allowed_methods' => ['*'],
     'allowed_origins' => ['*'],
     'allowed_origins_patterns' => [],
@@ -23,6 +23,7 @@ return [
     'exposed_headers' => [],
     'max_age' => 0,
     'supports_credentials' => false,
-    'allowed_origins' => ['http://127.0.0.1:5500'],
+    'allowed_headers' => ['Authorization', 'Content-Type', 'Accept'],
+    //'allowed_origins' => ['http://127.0.0.1:5500'],
 
 ];

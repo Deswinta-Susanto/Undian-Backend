@@ -5,31 +5,52 @@ namespace App\Http\Controllers;
 use App\Models\Admin;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 class AuthAdmin extends Controller
 {
+
     public function register(Request $request)
     {
+        // Mengambil data admin yang sedang terautentikasi menggunakan guard 'api'
+        $admin = Auth::guard('api')->user(); 
+        
+        // Memeriksa apakah admin terautentikasi
+        if (!$admin) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: Invalid token',
+            ], 401);
+        }
+    
         try {
+            // Validasi input dari request
             $validatedData = $request->validate([
                 'niip' => 'required|string|unique:admins',
                 'nama' => 'required|string|max:255',
-            
                 'unit' => 'required|string|max:255',
                 'password' => 'required|string|min:6',
             ]);
-            // Jika 'role' tidak diisi, set default menjadi 'general'
+            
+            // Menambahkan role yang diterima dari input atau default 'General'
             $validatedData['role'] = $request->input('role', 'General');
+            
+            // Mengenkripsi password sebelum menyimpannya
             $validatedData['password'] = Hash::make($validatedData['password']);
+            
+            // Membuat admin baru
             $admin = Admin::create($validatedData);
+            
+            // Membuat token JWT untuk admin baru
             $token = JWTAuth::fromUser($admin);
+            
             return response()->json([
                 'message' => 'Admin registered successfully',
                 'admin' => $admin,
-                'token' => $token,
             ], 201);
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             return response()->json([
                 'error' => 'Validation Error',
                 'messages' => $e->errors(),
@@ -41,23 +62,20 @@ class AuthAdmin extends Controller
             ], 500);
         }
     }
-
+    
     public function resetPassword(Request $request, $id)
 {
     try {
-        // Validasi input password baru
         $validatedData = $request->validate([
-            'password' => 'required|string|min:6|confirmed', // Pastikan ada password_confirmation
+            'password' => 'required|string|min:6|confirmed',
         ]);
 
-        // Cari admin berdasarkan ID
         $admin = Admin::find($id);
 
         if (!$admin) {
             return response()->json(['error' => 'Admin not found'], 404);
         }
 
-        // Hash password baru
         $admin->password = Hash::make($validatedData['password']);
         $admin->save();
 
@@ -74,90 +92,80 @@ class AuthAdmin extends Controller
         ], 500);
     }
 }    
-    public function login(Request $request)
-    {
-        $request->validate([
-            'nama' => 'required|string',
-            'password' => 'required|string',
-        ]);
+
+public function login(Request $request)
+{
+    $request->validate([
+        'nama' => 'required|string',
+        'password' => 'required|string',
+    ]);
+
+    // Cari user berdasarkan 'nama'
+    $user = Admin::where('nama', $request->nama)->first();
+
+    // Jika user tidak ditemukan
+    if (!$user) {
+        return response()->json(['error' => 'Unauthorized: User not found'], 401);
+    }
+    if (!Hash::check($request->password, $user->password)) {
+        return response()->json(['error' => 'Unauthorized: Incorrect password'], 401);
+    }
     
-        $admin = Admin::where('nama', $request->input('nama'))->first();
-    
-        if (!$admin || !Hash::check($request->input('password'), $admin->password)) {
-            return response()->json(['error' => 'Unauthorized'], 401);
-        }
-    
-        // Generate token JWT
-        $token = JWTAuth::fromUser($admin);
-    
-        // Response dengan token dan informasi user (role, nama)
+    // Buat token JWT
+    $token = JWTAuth::fromUser($user);
+
+    return response()->json([
+        'message' => 'Login successful',
+        'token' => $token,
+        'data' => $user,
+    ]);
+}
+
+public function getAllAdmins(Request $request)
+{
+    $admin = Auth::guard('api')->user();
+
+    if (!$admin) {
         return response()->json([
-            'token' => $token,
-            'user' => [
-                'id' => $admin->id,
-                'nama' => $admin->nama,
-                'role' => $admin->role, // Misal admin punya field 'role'
-            ]
-        ]);
-    }
-    
-
-    public function logout()
-    {
-        JWTAuth::invalidate(JWTAuth::getToken());
-        return response()->json(['message' => 'Successfully logged out']);
+            'success' => false,
+            'message' => 'Unauthorized: Invalid token',
+        ], 401);
     }
 
-    public function getAllAdmins()
-    {
+    $search = $request->query('q');
+
+    if ($search) {
         try {
-            $totalAdmins = Admin::select('id')->get()->count();
-            $dataAdmin = Admin::all();
-
-            return response()->json([
-                'total_id_sum' => $totalAdmins,
-                'admins' => $dataAdmin,
-            ], 200);
+            $admins = Admin::where('nama', 'like', "%$search%")->get();
         } catch (\Exception $e) {
             return response()->json([
-                'error' => 'Server Error',
-                'message' => $e->getMessage(),
+                'success' => false,
+                'message' => 'Error fetching data',
+                'error' => $e->getMessage(),
             ], 500);
         }
+    } else {
+        $admins = Admin::all();
     }
-    public function filterAdmins(Request $request)
-    {
-        try {
-            // Validasi parameter pencarian dari request body
-            $validatedData = $request->validate([
-                'search' => 'nullable|string',
-            ]);
-            $search = $validatedData['search'] ?? null;
-            $query = Admin::query();
-            if ($search) {
-                $query->where(function($q) use ($search) {
-                    $q->where('nama', 'like', "%$search%")
-                      ->orWhere('role', 'like', "%$search%")
-                      ->orWhere('niip', 'like', "%$search%");
-                });
-            }
-            $dataAdmin = $query->get();
-    
-            return response()->json([
-                'admins' => $dataAdmin,   
-            ], 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Server Error',
-                'message' => $e->getMessage(),
-            ], 500);
-        }
-    }
-    
-    
 
+    return response()->json([
+        'success' => true,
+        'message' => 'Admin authenticated successfully',
+        'data' => $admins,
+    ]);
+}
+    
     public function deleteAdmin($id)
 {
+    $admin = Auth::guard('api')->user();  
+    
+    if (!$admin) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthorized: Invalid token',
+        ], 401);
+    }
+
     try {
         $admin = Admin::find($id);
 
@@ -178,23 +186,29 @@ class AuthAdmin extends Controller
 
 public function updateAdmin(Request $request, $id)
 {
+    $admin = Auth::guard('api')->user();  
+    
+    if (!$admin) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthorized: Invalid token',
+        ], 401);
+    }
+    
     try {
-        // Cari admin berdasarkan ID
         $admin = Admin::find($id);
 
         if (!$admin) {
             return response()->json(['error' => 'Admin not found'], 404);
         }
 
-        // Validasi data yang dikirimkan
         $validatedData = $request->validate([
-            'niip' => 'nullable|string|unique:admins,niip,' . $id, // 'unique' kecuali untuk admin dengan ID ini
+            'niip' => 'nullable|string|unique:admins,niip,' . $id, 
             'nama' => 'nullable|string|max:255',
             'unit' => 'nullable|string|max:255',
             'role' => 'nullable|string|max:255',
         ]);
 
-        // Update data admin
         $admin->update($validatedData);
 
         return response()->json([
@@ -217,16 +231,28 @@ public function updateAdmin(Request $request, $id)
 public function getAdminById($id)
 {
     try {
-        // Cari admin berdasarkan ID
-        $admin = Admin::find($id);
+        $admin = Auth::guard('api')->user();
 
-        // Jika admin tidak ditemukan
         if (!$admin) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: Invalid token',
+            ], 401);
+        }
+
+        $adminData = Admin::find($id);
+
+        if (!$adminData) {
             return response()->json(['error' => 'Admin not found'], 404);
         }
 
-        // Jika admin ditemukan, kembalikan data admin
-        return response()->json($admin, 200);
+        return response()->json($adminData, 200);
+    } catch (\Tymon\JWTAuth\Exceptions\TokenExpiredException $e) {
+        return response()->json(['error' => 'Token has expired'], 401);
+    } catch (\Tymon\JWTAuth\Exceptions\TokenInvalidException $e) {
+        return response()->json(['error' => 'Token is invalid'], 401);
+    } catch (\Tymon\JWTAuth\Exceptions\JWTException $e) {
+        return response()->json(['error' => 'Token is missing'], 401);
     } catch (\Exception $e) {
         return response()->json([
             'error' => 'Server Error',
@@ -235,6 +261,42 @@ public function getAdminById($id)
     }
 }
 
+public function checkToken()
+{
+    try {
+        $user = auth()->user();
+        return response()->json(['user' => $user]);
+    } catch (\Tymon\JWTAuth\Exceptions\TokenExpiredException $e) {
+        return response()->json(['error' => 'Token is expired'], 401);
+    } catch (\Tymon\JWTAuth\Exceptions\TokenInvalidException $e) {
+        return response()->json(['error' => 'Token is invalid'], 401);
+    } catch (\Tymon\JWTAuth\Exceptions\JWTException $e) {
+        return response()->json(['error' => 'Token is absent'], 401);
+    }
+}
 
+public function logout(Request $request)
+{
+    try {
+        // Mengambil token dari header Authorization
+        $token = JWTAuth::getToken();
 
+        if (!$token) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Token not provided'
+            ], 400);
+        }
+
+        // Invalidasi token untuk logout
+        JWTAuth::invalidate($token);
+
+        return response()->json(['message' => 'Successfully logged out']);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to logout: ' . $e->getMessage(),
+        ], 500);
+    }
+}
 }

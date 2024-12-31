@@ -14,7 +14,7 @@ return [
     */
 
     'defaults' => [
-        'guard' => 'web',
+        'guard' => 'api',
         'passwords' => 'users',
     ],
 
@@ -41,13 +41,12 @@ return [
         'provider' => 'users',
     ],
 
-    'api' => [
-        'driver' => 'token',
-        'provider' => 'users',
+   'api' => [
+        'driver' => 'jwt',  // Assuming you are using JWT driver
+        'provider' => 'admins',  // This should match the provider name
         'hash' => false,
     ],
 ],
-
 
 
 
@@ -67,13 +66,13 @@ return [
     | Supported: "database", "eloquent"
     |
     */
-
 'providers' => [
-    'users' => [
-        'driver' => 'eloquent',
-        'model' => App\Models\User::class,
+    'admins' => [
+        'driver' => 'eloquent',  // or 'database' if you're using a custom provider
+        'model' => App\Models\Admin::class,  // Ensure this is the correct model
     ],
 ],
+
 
 
 
@@ -102,10 +101,10 @@ return [
 
     'passwords' => [
         'users' => [
-            'provider' => 'users',
+            'provider' => 'admins',
             'table' => 'password_reset_tokens',
-            'expire' => 60,
-            'throttle' => 60,
+            'expire' => 2880,
+            'throttle' => 0,
         ],
     ],
 
@@ -120,6 +119,6 @@ return [
     |
     */
 
-    'password_timeout' => 10800,
+    'password_timeout' => 0,
 
 ];
